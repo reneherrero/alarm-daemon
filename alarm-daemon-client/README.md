@@ -36,3 +36,17 @@ Run the included example:
 ```sh
 cargo run -p alarm-daemon-client --example basic
 ```
+
+## License
+
+Dual-licensed at your option under:
+
+- Apache License, Version 2.0 ([`../LICENSE-APACHE`](../LICENSE-APACHE) or
+  <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([`../LICENSE-MIT`](../LICENSE-MIT) or
+  <https://opensource.org/licenses/MIT>)
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in this crate by you, as defined in the
+Apache-2.0 license, shall be dual licensed as above, without any
+additional terms or conditions.

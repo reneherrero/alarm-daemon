@@ -1,11 +1,15 @@
 [package]
 name = "alarm-daemon"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.85"
-description = "Helm sailboat alarm daemon (see alarm-daemon-requirements.md)"
-license = "MIT OR Apache-2.0"
-publish = false
+description = "Helm sailboat alarm daemon (see REQUIREMENTS.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+publish.workspace = true
 
 [[bin]]
 name = "alarm-daemon"

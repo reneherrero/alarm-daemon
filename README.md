@@ -1,247 +1,79 @@
-# Alarm Workspace
+# alarm-daemon workspace
 
-This repository is a Rust workspace with two projects:
+[![ci](https://github.com/reneherrero/alarm-daemon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/reneherrero/alarm-daemon/actions/workflows/ci.yml)
+[![license: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
-- `alarm-daemon/` - D-Bus alarm service binary (`alarm-daemon`)
-- `alarm-daemon-client/` - typed Rust client crate for consumers
+Rust workspace housing the Helm sailboat alarm stack. Two crates:
+
+| Crate                                          | Kind   | Purpose                                                                                                           |
+|------------------------------------------------|--------|-------------------------------------------------------------------------------------------------------------------|
+| [`alarm-daemon/`](./alarm-daemon/)             | binary | Safety-critical `org.helm.AlarmDaemon` D-Bus service. Owns alarm lifecycle across crashes, redeploys, and reboots. See [`alarm-daemon/REQUIREMENTS.md`](./alarm-daemon/REQUIREMENTS.md) for the full design. |
+| [`alarm-daemon-client/`](./alarm-daemon-client/) | library | Typed async Rust client for the daemon's D-Bus surface — no manual message construction.                        |
+
+Per-crate READMEs have full build / run / deploy instructions:
+
+- [`alarm-daemon/README.md`](./alarm-daemon/README.md) — CI gate,
+  systemd unit, production / Yocto deployment, structured journald
+  logging, D-Bus schema contract.
+- [`alarm-daemon-client/README.md`](./alarm-daemon-client/README.md) —
+  client API surface + example.
 
 ## Quick start
 
 ```sh
-# Build everything
-cargo build --workspace
+# System dep (cpal links libasound, per FR-6.1):
+sudo apt install libasound2-dev      # Debian / Ubuntu / Yocto host
 
-# Run checks
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+# Run the full quality gate — build, clippy, workspace tests, aarch64
+# cross-check, release build + size report. Single source of truth for
+# both local runs and GitHub Actions.
+./ci.sh
 
-# Run daemon integration tests
-cargo test -p alarm-daemon --tests
+# Install the daemon as a user systemd unit for local hacking:
+./alarm-daemon/setup.sh install
 
-# Run client example
+# Try the client:
 cargo run -p alarm-daemon-client --example basic
 ```
-# alarm-daemon
 
-Safety-critical alarm service for the Helm sailboat system. Owns the lifecycle
-of every time- and condition-based alarm independently of the apps that arm it,
-so alerts keep firing across app crashes, redeploys, and reboots.
+## Repository layout
 
-See [`alarm-daemon-requirements.md`](./alarm-daemon-requirements.md) for the
-full design, and [`todo.md`](./todo.md) for what's implemented vs planned.
-
-> **Status — v0.1.** Only the `Arm` / `Disarm` / `Status` / `StateChanged`
-> slice of `org.helm.AlarmDaemon.Control` is live, backed by in-memory state.
-> Persistence, scheduling, evaluators, audio output, polkit, and the systemd
-> watchdog will land in later steps. Treat the instructions below as a dev
-> install; production packaging (system-bus policy, dedicated `alarm` user,
-> `CAP_WAKE_ALARM`, `/var/lib/helm/alarms.redb`) is not yet scoped here.
-
-## Build
-
-Requires Rust 1.85+ (edition 2024) and ALSA development headers (cpal links
-libasound at build time, per FR-6.1).
-
-```sh
-sudo apt install libasound2-dev   # Debian/Ubuntu/Yocto host
-cargo build --release
+```
+.
+├── alarm-daemon/               daemon crate + data/ (systemd, dbus, sysusers, tmpfiles)
+├── alarm-daemon-client/        client library crate
+├── ci.sh                       quality gate (build, clippy, test, cross-check, release)
+├── rust-toolchain.toml         pinned toolchain + cross targets
+├── .github/workflows/ci.yml    GitHub Actions wrapper around ci.sh
+├── Cargo.toml                  workspace manifest (shared metadata, lints, release profile)
+├── LICENSE-MIT                 MIT license text
+└── LICENSE-APACHE              Apache-2.0 license text
 ```
 
-The binary lands at `target/release/alarm-daemon`.
+## Supported production targets
 
-Lint gate used by CI:
+Both arches are first-class and exercised on every CI run:
 
-```sh
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-```
+- `x86_64-unknown-linux-gnu` — dev laptops, CI runners, x86 Yocto / NUC-class edge boxes
+- `aarch64-unknown-linux-gnu` — RPi 4/5, NXP i.MX8, TI Sitara, NVIDIA Jetson, arm64 VMs
 
-## Run
+See [`alarm-daemon/README.md`](./alarm-daemon/README.md#supported-production-targets)
+for details on how `ci.sh` handles cross-checking.
 
-The daemon chooses its bus via `ALARM_DAEMON_BUS` (default `session`). Log
-level follows `RUST_LOG` (default `info`).
+## License
 
-### Session bus (development)
+Licensed under either of
 
-```sh
-RUST_LOG=info ALARM_DAEMON_BUS=session ./target/release/alarm-daemon
-```
+- Apache License, Version 2.0 ([`LICENSE-APACHE`](./LICENSE-APACHE) or
+  <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([`LICENSE-MIT`](./LICENSE-MIT) or
+  <https://opensource.org/licenses/MIT>)
 
-Verify in another shell:
+at your option.
 
-```sh
-busctl --user call \
-    org.helm.AlarmDaemon /org/helm/AlarmDaemon \
-    org.helm.AlarmDaemon.Control Status
-# b false
+### Contribution
 
-busctl --user call \
-    org.helm.AlarmDaemon /org/helm/AlarmDaemon \
-    org.helm.AlarmDaemon.Control Arm s "builtin:collision"
-
-busctl --user monitor org.helm.AlarmDaemon   # watch StateChanged signals
-```
-
-For an isolated round-trip on a workstation without a running session bus:
-
-```sh
-dbus-run-session -- ./target/release/alarm-daemon
-```
-
-### System bus
-
-Running on the system bus requires a policy file granting the daemon its
-well-known name, plus (eventually) polkit rules for `Arm` / `Disarm`. A
-minimal policy lives at `/etc/dbus-1/system.d/org.helm.AlarmDaemon.conf`:
-
-```xml
-<!DOCTYPE busconfig PUBLIC
- "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
- "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
-<busconfig>
-  <policy user="helm">
-    <allow own="org.helm.AlarmDaemon"/>
-  </policy>
-  <policy context="default">
-    <allow send_destination="org.helm.AlarmDaemon"
-           send_interface="org.helm.AlarmDaemon.Control"/>
-    <allow send_destination="org.helm.AlarmDaemon"
-           send_interface="org.freedesktop.DBus.Introspectable"/>
-  </policy>
-</busconfig>
-```
-
-Then start the daemon as the `helm` user with `ALARM_DAEMON_BUS=system`.
-A polkit policy (NFR-4.1) is still TODO; until it lands, any local user can
-call `Arm`/`Disarm` through the policy above.
-
-## Install as a systemd unit
-
-The target deployment is a system unit owned by a dedicated `alarm` user with
-`CAP_WAKE_ALARM` and watchdog keepalive (NFR-2.4, NFR-4.2). That unit is not
-yet written — the v0.1 daemon has no watchdog loop and no persistent state to
-recover, so installing it system-wide today gains nothing.
-
-For local development, use the bundled script to install a **user** unit:
-
-```sh
-./setup.sh install     # build, install to ~/.local/bin, enable & start
-./setup.sh update      # rebuild and restart
-./setup.sh status      # show unit status
-./setup.sh uninstall   # stop, disable, and remove binary + unit
-```
-
-The script writes `~/.config/systemd/user/alarm-daemon.service` pointing at
-`~/.local/bin/alarm-daemon`, with `ALARM_DAEMON_BUS=session` and
-`RUST_LOG=info`. Follow the journal with:
-
-```sh
-journalctl --user -u alarm-daemon.service -f
-```
-
-## D-Bus surface (current)
-
-- Bus name: `org.helm.AlarmDaemon`
-- Object path: `/org/helm/AlarmDaemon`
-- Interface: `org.helm.AlarmDaemon.Control`
-  - `Arm(s sound_id) -> ()` — validates sound and schedules trigger
-  - `Disarm() -> ()` — idempotent
-  - `Snooze(u duration_s) -> ()` — stop now, re-trigger after delay
-  - `Dismiss() -> ()` — stop and clear alarm state
-  - `Status() -> b` — `true` when armed
-  - `CurrentSound() -> s` — currently selected sound ID, or empty string
-  - `ListSounds() -> as` — sound IDs (`builtin:<name>`, `custom:<id>`)
-  - `StateChanged(b armed)` — signal, emitted only on actual transitions
-
-The full method set (`ArmTimer`, `ArmAnchor`, `ArmCondition`, `Disarm(id)`,
-`Dismiss`, `Snooze`, `ListAlarms`, …) will grow on top of this without
-renaming the bus name or object path.
-
-## API quick reference (simple)
-
-All methods are on:
-
-- Bus name: `org.helm.AlarmDaemon`
-- Object path: `/org/helm/AlarmDaemon`
-- Interface: `org.helm.AlarmDaemon.Control`
-
-### Methods
-
-- `ListSounds() -> as`
-  - Returns all installed sound IDs you can use with `Arm`.
-  - Example IDs: `builtin:collision`, `builtin:casualty`.
-
-- `Arm(s sound_id) -> ()`
-  - Arms the daemon using the selected sound.
-  - The daemon validates `sound_id`, schedules the trigger, and changes state to armed.
-  - If `sound_id` is invalid, the call fails.
-
-- `Status() -> b`
-  - `true` means currently armed.
-  - `false` means currently disarmed.
-
-- `CurrentSound() -> s`
-  - Returns the currently selected sound ID while armed.
-  - Returns empty string when no sound is selected.
-
-- `Disarm() -> ()`
-  - Cancels pending trigger and stops active playback.
-  - Clears the currently selected sound.
-
-- `Snooze(u duration_s) -> ()`
-  - Stops current playback and schedules the same sound again after `duration_s`.
-  - Keeps the alarm armed.
-
-- `Dismiss() -> ()`
-  - Acknowledge/stop the alarm and clear armed state.
-
-### Signal
-
-- `StateChanged(b armed)`
-  - Emitted when the armed/disarmed state actually changes.
-
-### Typical client flow
-
-1. Call `ListSounds()`.
-2. Pick one `sound_id`.
-3. Call `Arm(sound_id)`.
-4. Optionally poll `Status()` / `CurrentSound()` or listen for `StateChanged`.
-5. Use `Snooze(duration_s)` to delay, or `Dismiss()` to clear.
-
-### `busctl` examples
-
-```sh
-# 1) List available sounds
-busctl --user call \
-  org.helm.AlarmDaemon /org/helm/AlarmDaemon \
-  org.helm.AlarmDaemon.Control ListSounds
-
-# 2) Arm with a specific sound
-busctl --user call \
-  org.helm.AlarmDaemon /org/helm/AlarmDaemon \
-  org.helm.AlarmDaemon.Control Arm s "builtin:collision"
-
-# 3) Check armed/disarmed status
-busctl --user call \
-  org.helm.AlarmDaemon /org/helm/AlarmDaemon \
-  org.helm.AlarmDaemon.Control Status
-
-# 4) Check currently selected sound
-busctl --user call \
-  org.helm.AlarmDaemon /org/helm/AlarmDaemon \
-  org.helm.AlarmDaemon.Control CurrentSound
-
-# 5) Disarm
-busctl --user call \
-  org.helm.AlarmDaemon /org/helm/AlarmDaemon \
-  org.helm.AlarmDaemon.Control Disarm
-
-# 6) Snooze for 5 seconds
-busctl --user call \
-  org.helm.AlarmDaemon /org/helm/AlarmDaemon \
-  org.helm.AlarmDaemon.Control Snooze u 5
-
-# 7) Dismiss
-busctl --user call \
-  org.helm.AlarmDaemon /org/helm/AlarmDaemon \
-  org.helm.AlarmDaemon.Control Dismiss
-```
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in the work by you, as defined in the
+Apache-2.0 license, shall be dual licensed as above, without any
+additional terms or conditions.

@@ -1,11 +1,15 @@
 [package]
 name = "alarm-daemon-client"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.85"
-description = "Typed Rust client for org.helm.AlarmDaemon D-Bus API"
-license = "MIT OR Apache-2.0"
-publish = false
+description = "Typed Rust client for the org.helm.AlarmDaemon D-Bus API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+publish.workspace = true
 
 [lib]
 name = "alarm_daemon_client"
