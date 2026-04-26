@@ -1,0 +1,13 @@
+# D-Bus bus-activation file for org.helm.AlarmDaemon.
+#
+# Lets dbus-daemon hand off activation to systemd: if a client sends a method
+# call to org.helm.AlarmDaemon while the daemon is not running, the bus asks
+# systemd to start `alarm-daemon.service`, which then claims the bus name.
+#
+# Not strictly required when the unit is enabled (it would already be running
+# at boot), but harmless and makes manual `busctl` testing more forgiving.
+[D-BUS Service]
+Name=org.helm.AlarmDaemon
+Exec=/bin/false
+SystemdService=alarm-daemon.service
+User=helm-alarm

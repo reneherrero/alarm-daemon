@@ -1,0 +1,31 @@
+[package]
+name = "alarm-daemon"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Helm sailboat alarm daemon (see alarm-daemon-requirements.md)"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[[bin]]
+name = "alarm-daemon"
+path = "src/main.rs"
+
+[dependencies]
+cpal = "0.15"
+symphonia = { version = "0.5", default-features = false, features = ["wav", "flac", "pcm"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["signal", "sync"] }
+tracing = { workspace = true }
+tracing-journald = { workspace = true }
+tracing-subscriber = { workspace = true }
+zbus = { workspace = true }
+redb = "2"
+sd-notify = "0.5"
+
+[dev-dependencies]
+fs2 = "0.4"
+quick-xml = "0.39"
+
+[lints]
+workspace = true

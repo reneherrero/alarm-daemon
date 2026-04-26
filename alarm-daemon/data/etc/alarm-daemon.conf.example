@@ -1,0 +1,21 @@
+# Optional override file for alarm-daemon.service.
+#
+# Install at /etc/helm/alarm-daemon.conf to override any of the defaults
+# baked into the systemd unit. The unit references this file as
+# `EnvironmentFile=-/etc/helm/alarm-daemon.conf` (the leading `-` makes it
+# optional), so the daemon starts fine even when this file is absent.
+#
+# Each line must be `KEY=value` with no quotes — systemd parses it as an
+# environment file, not as shell.
+
+# ALARM_DAEMON_BUS=system
+# ALARM_DAEMON_DB_PATH=/var/lib/helm/alarm-daemon.redb
+# ALARM_DAEMON_SOUND_DIR=/usr/share/helm/sounds
+# ALARM_DAEMON_CUSTOM_SOUND_DIR=/var/lib/helm/sounds
+
+# Trace level (info|debug|trace) and per-target filters; see tracing-subscriber.
+# RUST_LOG=info
+
+# Override the trigger delay applied between Arm and the alarm firing. Useful
+# for development; the future scheduler will compute its own delays.
+# ALARM_DAEMON_TRIGGER_DELAY_MS=3000

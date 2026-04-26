@@ -1,0 +1,51 @@
+[workspace]
+members = ["alarm-daemon", "alarm-daemon-client"]
+resolver = "2"
+
+[workspace.dependencies]
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1"
+tracing-journald = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zbus = { version = "5.14.0", default-features = false, features = ["tokio"] }
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+# --------------------------------------------------------------------------
+# Release profile — tuned for embedded / Yocto deployment.
+#
+# Defaults are optimised for desktop / library use (fast incremental rebuilds,
+# unwinding panics, separate codegen units). A boat console target benefits
+# from the opposite trade-off: smaller binary, deterministic-on-panic
+# behaviour, and one-shot link-time optimisation. The shipping artifact is
+# tiny enough to land in `${IMAGE_ROOTFS_SIZE}` budgets and has no unwind
+# tables, which keeps `MemoryDenyWriteExecute=true` happy on suspect targets.
+# --------------------------------------------------------------------------
+[profile.release]
+# Single codegen unit + thin LTO across the whole workspace lets rustc inline
+# across crate boundaries (≈ 10–20% size + speed improvement here).
+codegen-units = 1
+lto = "thin"
+
+# Strip every debug symbol from the deployed binary. Symbols stay in
+# `target/release/deps/` for local debugging (or for separate `*.dbg`
+# packaging via `objcopy --only-keep-debug` in a Yocto recipe).
+strip = "symbols"
+
+# panic=abort is the right policy for a systemd-supervised safety daemon:
+# - We've already denied `clippy::{panic, unwrap_used, expect_used}` in src/,
+#   so a runtime panic indicates a true programming bug, not a recoverable
+#   condition that unwinding should clean up after.
+# - Aborting hands control to systemd's `Restart=on-failure` instead of
+#   leaving the daemon half-alive in an undefined state.
+# - Drops unwind tables, shrinking the binary further and matching the
+#   `MemoryDenyWriteExecute=true` posture (no JIT-style stack unwinding).
+# Tests use [profile.test] which keeps the default unwind, so #[should_panic]
+# still works.
+panic = "abort"

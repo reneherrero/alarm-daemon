@@ -1,0 +1,81 @@
+[Unit]
+Description=Helm alarm daemon
+Documentation=file:///usr/share/doc/alarm-daemon/README.md
+# dbus.service is the broker; sound.target gates on ALSA being present.
+After=dbus.service sound.target
+Requires=dbus.service
+
+[Service]
+# Type=notify gates dependent units on the daemon's explicit READY=1 message
+# (sent after the D-Bus name is owned, audio thread is alive, and persistence
+# is opened). The daemon also pings WATCHDOG=1 at WatchdogSec/2 so a runtime
+# stall causes systemd to kill + restart us instead of leaving alarms dead.
+# `BusName=` is *not* set: it's only used for ready-tracking under Type=dbus,
+# and dbus activation is configured separately in
+# data/dbus/org.helm.AlarmDaemon.service.
+Type=notify
+NotifyAccess=main
+WatchdogSec=10s
+ExecStart=/usr/bin/alarm-daemon
+
+# Run as a dedicated, unprivileged user. See data/sysusers.d for provisioning.
+User=helm-alarm
+Group=helm
+
+# Bus + storage selection. `EnvironmentFile=` lets distro packagers override
+# any of the values below from /etc without editing the unit file. The leading
+# `-` makes the file optional so the daemon also starts on stock images.
+Environment=ALARM_DAEMON_BUS=system
+Environment=ALARM_DAEMON_DB_PATH=/var/lib/helm/alarm-daemon.redb
+Environment=ALARM_DAEMON_SOUND_DIR=/usr/share/helm/sounds
+Environment=ALARM_DAEMON_CUSTOM_SOUND_DIR=/var/lib/helm/sounds
+EnvironmentFile=-/etc/helm/alarm-daemon.conf
+
+# --- Hardening (see systemd.exec(5) and `systemd-analyze security`). ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/helm
+PrivateTmp=true
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+
+# Audio output requires /dev/snd/*; we whitelist just the ALSA char devices
+# rather than disabling PrivateDevices wholesale.
+PrivateDevices=false
+DeviceAllow=char-alsa rw
+
+# CAP_WAKE_ALARM lets the future scheduler use CLOCK_BOOTTIME_ALARM timers so
+# the daemon wakes the system from suspend. Setting both bounding and ambient
+# is required for a non-root User= to actually retain the capability.
+CapabilityBoundingSet=CAP_WAKE_ALARM
+AmbientCapabilities=CAP_WAKE_ALARM
+
+# --- Restart policy ---
+# `on-failure` covers exit-with-error, signal-induced exits (excluding clean
+# SIGTERM/SIGINT/SIGHUP/SIGPIPE) *and* watchdog timeouts, per systemd.service(5).
+Restart=on-failure
+RestartSec=2s
+
+# Shutdown is essentially instant (drop D-Bus connection, no flushes) — give
+# it 10s before SIGKILL so a real wedge doesn't keep systemd waiting 90s.
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=multi-user.target

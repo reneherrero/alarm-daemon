@@ -1,0 +1,30 @@
+# Rust build output (all workspace members)
+target/
+
+# Local database/runtime artifacts
+*.redb
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Coverage and profiling outputs
+*.profraw
+*.profdata
+coverage/
+tarpaulin-report.html
+
+# Environment/local config
+.env
+.env.*
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS junk
+.DS_Store
+Thumbs.db

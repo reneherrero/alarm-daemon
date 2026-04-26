@@ -1,0 +1,20 @@
+[package]
+name = "alarm-daemon-client"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Typed Rust client for org.helm.AlarmDaemon D-Bus API"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "alarm_daemon_client"
+path = "src/lib.rs"
+
+[dependencies]
+thiserror = { workspace = true }
+zbus = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+
+[lints]
+workspace = true

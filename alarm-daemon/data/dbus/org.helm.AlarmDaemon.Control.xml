@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE node PUBLIC
+  "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+  "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+
+<!--
+  Static D-Bus introspection schema for the Helm alarm daemon.
+
+  This file is the authoritative contract for the
+  `org.helm.AlarmDaemon.Control` interface. The Rust `#[interface]` impl in
+  alarm-daemon/src/ipc/control.rs MUST stay in sync with the methods,
+  arguments, and signal definitions below. The integration test
+  `tests/introspect_xml.rs` boots the daemon, fetches its live introspection
+  XML, and asserts equivalence.
+
+  Standard interfaces auto-exported by the zbus runtime
+  (`org.freedesktop.DBus.{Introspectable, Peer, Properties}`) are intentionally
+  NOT redeclared here.
+
+  Installation path (Yocto / distro packagers):
+
+      /usr/share/dbus-1/interfaces/org.helm.AlarmDaemon.Control.xml
+
+  Suggested consumers:
+
+  - Code generators: `zbus-xmlgen`, `gdbus-codegen`, `dbus-fast` (Python),
+    `dbus-deviation` (API drift checker).
+  - Documentation: `dbus-doc` and friends pick up `<doc:doc>` annotations.
+  - IDE tooling: VSCode + JetBrains D-Bus extensions render this file
+    natively for caller-side autocomplete.
+-->
+
+<node xmlns:doc="http://www.freedesktop.org/dbus/1.0/doc.dtd">
+
+  <interface name="org.helm.AlarmDaemon.Control">
+
+    <doc:doc>
+      <doc:description>
+        <doc:para>
+          Sole control surface for the Helm alarm daemon. Methods are exposed
+          on the well-known bus name <doc:tt>org.helm.AlarmDaemon</doc:tt> at
+          object path <doc:tt>/org/helm/AlarmDaemon</doc:tt>.
+        </doc:para>
+        <doc:para>
+          All methods are safe to call concurrently. Errors propagate as
+          standard D-Bus errors: invalid arguments use
+          <doc:tt>org.freedesktop.DBus.Error.InvalidArgs</doc:tt>; runtime
+          failures use <doc:tt>org.freedesktop.DBus.Error.Failed</doc:tt>.
+        </doc:para>
+      </doc:description>
+    </doc:doc>
+
+    <method name="Arm">
+      <arg name="sound_id" type="s" direction="in"/>
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Validate <doc:tt>sound_id</doc:tt>, transition to the
+            <doc:i>armed</doc:i> state, and schedule the alarm trigger.
+          </doc:para>
+          <doc:para>
+            <doc:tt>sound_id</doc:tt> must reference an installed sound and
+            takes one of two namespaced forms:
+          </doc:para>
+          <doc:list>
+            <doc:item><doc:term><doc:tt>builtin:&lt;name&gt;</doc:tt></doc:term></doc:item>
+            <doc:item><doc:term><doc:tt>custom:&lt;id&gt;</doc:tt></doc:term></doc:item>
+          </doc:list>
+          <doc:para>
+            Use <doc:ref type="method" to="Control.ListSounds">ListSounds</doc:ref>
+            to enumerate valid IDs. Calling <doc:tt>Arm</doc:tt> while already
+            armed cancels any pending trigger and reschedules with the new
+            sound.
+          </doc:para>
+        </doc:description>
+        <doc:errors>
+          <doc:error name="org.freedesktop.DBus.Error.InvalidArgs"
+                     description="sound_id is unknown or malformed"/>
+        </doc:errors>
+      </doc:doc>
+    </method>
+
+    <method name="Disarm">
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Cancel any pending trigger, stop in-flight playback, and clear the
+            currently selected sound. Idempotent — calling
+            <doc:tt>Disarm</doc:tt> when already disarmed is a no-op.
+          </doc:para>
+        </doc:description>
+      </doc:doc>
+    </method>
+
+    <method name="Snooze">
+      <arg name="duration_s" type="u" direction="in"/>
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Stop current playback and re-schedule the same sound to fire again
+            after <doc:tt>duration_s</doc:tt> seconds. Keeps the alarm armed.
+            Useful for "snooze for N seconds" UI affordances.
+          </doc:para>
+        </doc:description>
+        <doc:errors>
+          <doc:error name="org.freedesktop.DBus.Error.InvalidArgs"
+                     description="duration_s is zero"/>
+          <doc:error name="org.freedesktop.DBus.Error.Failed"
+                     description="no sound is currently armed"/>
+        </doc:errors>
+      </doc:doc>
+    </method>
+
+    <method name="Dismiss">
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Acknowledge an active alarm: stop playback, cancel the pending
+            trigger, and disarm. Equivalent to an operator pressing
+            <doc:i>OK</doc:i> on the alarm UI.
+          </doc:para>
+        </doc:description>
+      </doc:doc>
+    </method>
+
+    <method name="Status">
+      <arg type="b" direction="out"/>
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Returns <doc:tt>true</doc:tt> when the alarm is currently armed,
+            <doc:tt>false</doc:tt> otherwise. Cheap; safe to poll. Prefer
+            subscribing to
+            <doc:ref type="signal" to="Control.StateChanged">StateChanged</doc:ref>
+            for change notifications.
+          </doc:para>
+        </doc:description>
+      </doc:doc>
+    </method>
+
+    <method name="CurrentSound">
+      <arg type="s" direction="out"/>
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Returns the <doc:tt>sound_id</doc:tt> currently selected for the
+            armed alarm, or the empty string when nothing is selected
+            (typically because the daemon is disarmed).
+          </doc:para>
+        </doc:description>
+      </doc:doc>
+    </method>
+
+    <method name="ListSounds">
+      <arg type="as" direction="out"/>
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Enumerate every sound ID the daemon can play. IDs are namespaced
+            (<doc:tt>builtin:&lt;name&gt;</doc:tt> /
+            <doc:tt>custom:&lt;id&gt;</doc:tt>) and are valid as
+            <doc:ref type="method" to="Control.Arm">Arm</doc:ref> arguments.
+          </doc:para>
+        </doc:description>
+        <doc:errors>
+          <doc:error name="org.freedesktop.DBus.Error.Failed"
+                     description="sound directory is unreadable"/>
+        </doc:errors>
+      </doc:doc>
+    </method>
+
+    <signal name="StateChanged">
+      <arg name="armed" type="b"/>
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Emitted whenever the armed state actually transitions. Suppressed
+            on no-op operations (e.g. <doc:tt>Disarm</doc:tt> while already
+            disarmed) so subscribers can treat each emission as an
+            authoritative change event.
+          </doc:para>
+        </doc:description>
+      </doc:doc>
+    </signal>
+
+  </interface>
+
+</node>
