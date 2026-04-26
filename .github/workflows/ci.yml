@@ -1,0 +1,98 @@
+# Continuous integration for the alarm-daemon workspace.
+#
+# Single source of truth is `./ci.sh` at the repo root — this workflow exists
+# only to (1) provision the system deps the script needs and (2) run it. Keep
+# stages, env vars, and tooling decisions in `ci.sh`; never add a build step
+# here that's not also exercisable locally.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel an in-flight run when a newer commit lands on the same branch / PR.
+# Saves runner minutes and keeps the "latest run" status badge accurate.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+
+jobs:
+  ci:
+    # The workflow runs on ubuntu-latest (x86_64); ci.sh auto-detects the
+    # host target and cross-checks the other supported production target
+    # (currently aarch64-unknown-linux-gnu). Run from an arm64 host and
+    # the cross-check flips to x86_64 — no workflow change needed.
+    name: build · clippy · test · cross-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # System packages required by the workspace:
+      #
+      #   libasound2-dev  cpal links libasound (FR-6.1) and alsa-sys's
+      #                   build.rs reads the headers via pkg-config
+      #   pkg-config      used by alsa-sys + zbus for native lib lookup;
+      #                   pre-installed on ubuntu-latest but explicit
+      #                   for documentation / drift safety
+      #   dbus            provides `dbus-run-session`, used by the
+      #                   integration tests in alarm-daemon/tests/*.rs to
+      #                   stand up an isolated session bus per test
+      - name: install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              libasound2-dev pkg-config dbus
+
+      # rust-toolchain.toml in the repo pins channel + targets, so the first
+      # cargo invocation auto-installs the right toolchain (incl. the
+      # rust-std for both x86_64-unknown-linux-gnu and
+      # aarch64-unknown-linux-gnu — the production targets exercised by
+      # ci.sh's cross-check stage). Force install eagerly so that
+      # toolchain-fetch latency doesn't bleed into — and invalidate — the
+      # rust-cache restore.
+      - name: install pinned toolchain (from rust-toolchain.toml)
+        run: |
+          rustup show active-toolchain
+          rustup target list --installed
+
+      # Caches ~/.cargo/registry and target/ keyed on Cargo.lock + toolchain
+      # version. First run on `main` pays the full ~5 min compile; PR runs
+      # afterwards typically hit the cache and finish in ~1 min.
+      - name: cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: run quality gate
+        run: ./ci.sh
+
+      # Surface the stripped release-binary size in the run summary so a
+      # release-profile budget regression (LTO disabled, panic=unwind
+      # re-enabled, debug accidentally on, …) shows up at the top of the
+      # workflow run page without needing to dig into logs.
+      - name: report release artifact size
+        if: always()
+        run: |
+          bin=target/release/alarm-daemon
+          if [ -x "$bin" ]; then
+              bytes=$(stat -c '%s' "$bin")
+              human=$(numfmt --to=iec --suffix=B "$bytes")
+              {
+                  echo "### Release artifact"
+                  echo
+                  echo "| binary | size |"
+                  echo "|--------|------|"
+                  echo "| \`$bin\` | **$human** ($bytes bytes) |"
+              } >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -1,5 +1,7 @@
 # alarm-daemon
 
+[![ci](https://github.com/reneherrero/alarm-daemon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/reneherrero/alarm-daemon/actions/workflows/ci.yml)
+
 Safety-critical alarm service for the Helm sailboat system. Owns the lifecycle
 of every time- and condition-based alarm independently of the apps that arm it,
 so alerts keep firing across app crashes, redeploys, and reboots.
@@ -54,7 +56,7 @@ captured in [`../ci.sh`](../ci.sh). Run it before pushing:
 
 ```sh
 ./ci.sh                # all stages, ~40s on a warm cache
-SKIP_CROSS=1 ./ci.sh   # skip stage 4 if rust-std arm64 is unavailable
+SKIP_CROSS=1 ./ci.sh   # skip stage 4 if cross rust-std is unavailable
 VERBOSE=1 ./ci.sh      # stream cargo output instead of summarising
 ```
 
@@ -64,24 +66,46 @@ Stages, in order:
 2. `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 3. `cargo test --workspace --no-fail-fast` (incl. integration tests
    under `dbus-run-session`)
-4. `PKG_CONFIG_ALLOW_CROSS=1 cargo check --target aarch64-unknown-linux-gnu`
-   — no-link smoke test against the canonical Yocto board arch (RPi 4/5,
-   NXP i.MX8, TI Sitara, NVIDIA Jetson). Catches portability regressions
-   before they hit a real bitbake build, without needing a sysroot on dev
-   machines (Yocto supplies a real one in production).
+4. `PKG_CONFIG_ALLOW_CROSS=1 cargo check --target <T>` for every
+   supported production target `T` that **isn't** the build host —
+   no-link smoke test that catches portability regressions before they
+   hit a real bitbake build, without needing a sysroot on dev machines
+   (Yocto / an SDK supplies a real one in production).
 5. `cargo build --release` and report the stripped binary size, so
    release-profile budget regressions show up as a bisectable diff in CI
    logs.
 
-Stage 4 relies on the [`../rust-toolchain.toml`](../rust-toolchain.toml)
-pin to install the `aarch64-unknown-linux-gnu` rust-std component
-automatically the first time anyone runs cargo in this repo. To add
-another cross target (e.g. `armv7-unknown-linux-gnueabihf` for older
-boards), append it to `targets = […]` and add a corresponding stage in
-`ci.sh`.
+### Supported production targets
 
-Wrap `./ci.sh` from whichever CI host you use — keep it the single source
-of truth so local and CI runs stay byte-identical. Lint gate alone:
+The workspace is first-class on both:
+
+| Triple                       | Typical deployment                                     |
+|------------------------------|--------------------------------------------------------|
+| `x86_64-unknown-linux-gnu`   | dev laptops, CI runners, NUC-class edge boxes          |
+| `aarch64-unknown-linux-gnu`  | RPi 4/5, NXP i.MX8, TI Sitara, NVIDIA Jetson, arm64 VMs |
+
+Both are pinned in [`../rust-toolchain.toml`](../rust-toolchain.toml), so
+`rustup` installs both `rust-std` components automatically the first
+time anyone runs cargo in this repo, and `ci.sh` auto-detects the host
+triple and cross-checks the **other** one on every run — x86 hosts
+catch arm64 breakage and vice versa. To add a third target (e.g.
+`armv7-unknown-linux-gnueabihf` for 32-bit ARMv7 boards), append it to
+both the `targets = […]` list in `rust-toolchain.toml` and
+`PRODUCTION_TARGETS=(…)` in `ci.sh`.
+
+### CI
+
+GitHub Actions wraps `./ci.sh` on every push and PR to `main` —
+see [`../.github/workflows/ci.yml`](../.github/workflows/ci.yml). The
+workflow itself is intentionally thin: install `libasound2-dev pkg-config
+dbus`, restore the cargo / `target/` cache (`Swatinem/rust-cache`), then
+shell out to `./ci.sh`. The release-binary size is published to the
+workflow run summary so budget regressions are visible without digging
+into logs.
+
+If you need to wrap `./ci.sh` from a different CI host (GitLab CI, Yocto
+autobuilder, Drone, …), keep it the single source of truth — never
+duplicate stages in CI YAML. Lint gate alone:
 
 ```sh
 cargo clippy --workspace --all-targets --all-features -- -D warnings

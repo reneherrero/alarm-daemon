@@ -4,13 +4,27 @@
 # automatically the first time they run any cargo command in this repo.
 # `rust-version` in each crate's Cargo.toml still gates MSRV separately.
 #
-# The aarch64 target is here so `ci.sh` can run a no-link `cargo check`
-# against it without any per-machine setup — it's the canonical Yocto board
-# arch (RPi 4/5, NXP i.MX8, TI Sitara, NVIDIA Jetson, …). Add other targets
-# to the list as needed.
+# Both supported production architectures are listed explicitly:
+#
+#   - x86_64-unknown-linux-gnu   — developer laptops, CI runners, x86
+#                                  Yocto targets (NUC-class edge boxes).
+#   - aarch64-unknown-linux-gnu  — canonical 64-bit ARM Yocto boards
+#                                  (RPi 4/5, NXP i.MX8, TI Sitara,
+#                                  NVIDIA Jetson, Apple-silicon Linux
+#                                  VMs, …).
+#
+# Listing both (rather than relying on "the host is always x86") means
+# `ci.sh` can always cross-check the non-host target regardless of which
+# architecture a contributor is building on. rustup installs the rust-std
+# for every target in this list on first use; the component is small
+# (~40 MB) and the listing stays future-proof if/when we gain arm64 dev
+# hardware.
 
 [toolchain]
 channel = "stable"
 profile = "minimal"
 components = ["rustfmt", "clippy"]
-targets = ["aarch64-unknown-linux-gnu"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]

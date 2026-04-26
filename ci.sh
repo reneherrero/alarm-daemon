@@ -14,13 +14,19 @@
 #   2. cargo clippy          (--all-targets --all-features -D warnings)
 #   3. cargo test            (workspace, includes the dbus-run-session
 #                             integration tests)
-#   4. cargo check (cross)   (no-link compile against
-#                             aarch64-unknown-linux-gnu — the canonical
-#                             Yocto board arch — to catch portability
-#                             regressions before they hit a bitbake build)
-#   5. cargo build --release (and report the stripped binary size, so the
+#   4. cargo check (cross)   (no-link compile against every supported
+#                             production target that ISN'T the build
+#                             host, catching portability regressions
+#                             before they hit a bitbake build. The host
+#                             target is already covered by stage 1.)
+#   5. cargo build --release (and report the stripped binary size, so
 #                             release-profile budget regressions are
 #                             visible in CI logs)
+#
+# Supported production targets are listed in $PRODUCTION_TARGETS below,
+# and mirror `targets = [...]` in rust-toolchain.toml — keep the two in
+# sync. rustup installs the rust-std from the toml; ci.sh exercises it
+# here.
 #
 # The cross-compile stage uses `PKG_CONFIG_ALLOW_CROSS=1` because alsa-sys
 # refuses cross builds without an explicit sysroot. For a no-link `cargo
@@ -32,13 +38,19 @@
 #
 #   ./ci.sh                # run all stages
 #   SKIP_CROSS=1 ./ci.sh   # skip stage 4 (handy on machines without
-#                            the aarch64 std library installed)
+#                            cross rust-std components installed)
 #   VERBOSE=1 ./ci.sh      # stream cargo output instead of summarising
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
+
+# Keep in sync with rust-toolchain.toml :: targets.
+PRODUCTION_TARGETS=(
+    x86_64-unknown-linux-gnu
+    aarch64-unknown-linux-gnu
+)
 
 # ----- pretty output ---------------------------------------------------------
 
@@ -88,16 +100,24 @@ run_stage "cargo clippy (-D warnings)" \
 run_stage "cargo test (workspace)" \
     cargo test --workspace --no-fail-fast
 
+host_target="$(rustc -vV | awk '/^host:/ {print $2}')"
+
 if [[ "${SKIP_CROSS:-0}" == "1" ]]; then
-    step "cargo check (cross: aarch64-unknown-linux-gnu)  ${DIM}— skipped (SKIP_CROSS=1)${RESET}"
+    step "cargo check (cross)  ${DIM}— skipped (SKIP_CROSS=1)${RESET}"
 else
-    # PKG_CONFIG_ALLOW_CROSS=1 lets alsa-sys's build.rs read the host's
-    # libasound headers when generating Rust bindings against the cross
-    # target. For a no-link `cargo check` this is correct — Yocto / a real
-    # cross toolchain supplies an arm64 sysroot in production.
-    PKG_CONFIG_ALLOW_CROSS=1 run_stage \
-        "cargo check (cross: aarch64-unknown-linux-gnu)" \
-        cargo check --workspace --target aarch64-unknown-linux-gnu --all-targets
+    for target in "${PRODUCTION_TARGETS[@]}"; do
+        if [[ "$target" == "$host_target" ]]; then
+            step "cargo check (cross: $target)  ${DIM}— native host, already covered by stage 1${RESET}"
+            continue
+        fi
+        # PKG_CONFIG_ALLOW_CROSS=1 lets alsa-sys's build.rs read the host's
+        # libasound headers when generating Rust bindings against the cross
+        # target. For a no-link `cargo check` this is correct — Yocto /
+        # an SDK supplies a proper cross sysroot in production.
+        PKG_CONFIG_ALLOW_CROSS=1 run_stage \
+            "cargo check (cross: $target)" \
+            cargo check --workspace --target "$target" --all-targets
+    done
 fi
 
 run_stage "cargo build --release (host)" \
@@ -109,8 +129,8 @@ release_bin="target/release/alarm-daemon"
 if [[ -x "$release_bin" ]]; then
     size_bytes=$(stat -c '%s' "$release_bin")
     size_h=$(numfmt --to=iec --suffix=B "$size_bytes")
-    printf '\n%s==> release artifact%s\n    %s = %s (%s bytes)\n' \
-        "$BOLD" "$RESET" "$release_bin" "$size_h" "$size_bytes"
+    printf '\n%s==> release artifact%s\n    host = %s\n    %s = %s (%s bytes)\n' \
+        "$BOLD" "$RESET" "$host_target" "$release_bin" "$size_h" "$size_bytes"
 fi
 
 printf '\n%s==> all stages passed%s\n' "$BOLD$GREEN" "$RESET"
